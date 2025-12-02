@@ -1,74 +1,76 @@
-const APP_SHELL_CACHE = 'app-shell-v3';
-const DYNAMIC_CACHE = 'dynamic-cache-v3';
-
-const ASSETS_APP_SHELL = [
-    './',
-    './index.html',
-    './CalendarPage.html',
-    './FormPage.html',
-    './Estilos.css',
-    './main.js',
-    './manifest.json', 
-    './images/icons/icon-192x192.png', 
-    './images/icons/icon-512x512.png', 
-    './images/icons/apple-touch-icon-180x180.png'
+const CACHE_NAME = "calendar-v2-2025-12-02";
+const PRECACHE_URLS = [
+  "./",
+  "./index.html",
+  "./css/calendar.css",
+  "./Estilos.css",
+  "./main.js",
+  "./js/calendar.js",
+  "./192.png",
+  "./512.png",
+  "./icons/cal-192-v2.png",
+  "./icons/cal-512-v2.png",
 ];
 
-self.addEventListener('install', event => {
-    console.log('[SW] Instalando...');
-    event.waitUntil(
-        caches.open(APP_SHELL_CACHE)
-        .then(cache => {
-            console.log('[SW] Guardando en caché el App Shell:', ASSETS_APP_SHELL);
-            return cache.addAll(ASSETS_APP_SHELL);
-        })
-    );
+self.addEventListener("install", (event) => {
+  self.skipWaiting();
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_URLS))
+  );
 });
 
-self.addEventListener('activate', event => {
-    console.log('[SW] Activado.');
-    event.waitUntil(
-        caches.keys().then(keys => {
-            return Promise.all(keys
-                .filter(key => key !== APP_SHELL_CACHE && key !== DYNAMIC_CACHE)
-                .map(key => {
-                    console.log(`[SW] Borrando caché antiguo: ${key}`);
-                    return caches.delete(key);
-                })
-            );
-        })
-    );
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    caches
+      .keys()
+      .then((keys) =>
+        Promise.all(
+          keys.map((k) => {
+            if (k !== CACHE_NAME) return caches.delete(k);
+          })
+        )
+      )
+      .then(() => self.clients.claim())
+  );
 });
 
-self.addEventListener('fetch', event => {
+// Cache-first for navigation & assets, fallback to network then offline page
+self.addEventListener("fetch", (event) => {
+  const req = event.request;
+  // Only handle navigation and GET requests
+  if (req.method !== "GET") return;
+
+  // For navigation, use network-first then cache fallback
+  if (req.mode === "navigate") {
     event.respondWith(
-        caches.match(event.request)
-        .then(response => {
-            if (response) {
-                console.log(`[Cache] Devolviendo ${event.request.url}`);
-                return response;
-            }
-
-            console.log(`[Red] Buscando en la red ${event.request.url}`);
-            return fetch(event.request)
-                .then(networkResponse => {
-                    const responseToCache = networkResponse.clone();
-
-                    caches.open(DYNAMIC_CACHE)
-                        .then(cache => {
-                            
-                            if (event.request.method === 'GET') {
-                                console.log(`[Cache] Guardando en caché dinámico ${event.request.url}`);
-                                cache.put(event.request, responseToCache);
-                            }
-                            
-                        });
-                    
-                    return networkResponse;
-                })
-                .catch(() => {
-                    console.error(`[Error] Falló la caché y la red para ${event.request.url}`);
-                 });
+      fetch(req)
+        .then((resp) => {
+          // Update cache
+          caches.open(CACHE_NAME).then((c) => c.put(req, resp.clone()));
+          return resp;
         })
+        .catch(() => caches.match("./index.html"))
     );
+    return;
+  }
+
+  // For other requests: cache-first
+  event.respondWith(
+    caches.match(req).then((cached) => {
+      if (cached) return cached;
+      return fetch(req)
+        .then((response) => {
+          // cache the file
+          return caches.open(CACHE_NAME).then((cache) => {
+            cache.put(req, response.clone());
+            return response;
+          });
+        })
+        .catch(() => {
+          // optionally return a default offline image for images
+          if (req.destination === "image")
+            return caches.match("./icons/cal-192-v2.png");
+        });
+    })
+  );
 });
